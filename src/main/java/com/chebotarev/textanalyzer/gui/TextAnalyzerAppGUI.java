@@ -11,6 +11,9 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
@@ -20,6 +23,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class TextAnalyzerAppGUI extends Application {
 
@@ -30,6 +35,7 @@ public class TextAnalyzerAppGUI extends Application {
     private Label dictStatusLabel;
     private TableView<WordFrequency> statsTable;
     private TableView<SpellingError> errorsTable;
+    private TextFlow errorHighlightArea; // Область для подсветки ошибок
 
     // Сервисы и данные
     private TextAnalysisService service;
@@ -98,6 +104,14 @@ public class TextAnalyzerAppGUI extends Application {
         textInput.setPromptText("Enter text to analyze...");
         textInput.setWrapText(true);
 
+        // Область для подсветки ошибок
+        errorHighlightArea = new TextFlow();
+        errorHighlightArea.setPadding(new Insets(5));
+        errorHighlightArea.setStyle("-fx-border-color: lightgray; -fx-border-width: 1;");
+        ScrollPane scrollPane = new ScrollPane(errorHighlightArea);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setPrefHeight(200);
+
         // Панель статистики ввода
         HBox statsPanel = new HBox(10);
         Label charCount = new Label("Characters: 0");
@@ -107,12 +121,15 @@ public class TextAnalyzerAppGUI extends Application {
         textInput.textProperty().addListener((obs, oldVal, newVal) -> {
             charCount.setText("Characters: " + newVal.length());
             wordCount.setText("Words: " + service.countTotalWords(newVal));
+            updateErrorHighlight(newVal);
         });
 
         statsPanel.getChildren().addAll(charCount, wordCount);
         inputPanel.getChildren().addAll(
                 new Label("Input Text:"),
                 textInput,
+                new Label("Text with Errors Highlighted:"),
+                scrollPane,
                 statsPanel
         );
 
@@ -222,6 +239,7 @@ public class TextAnalyzerAppGUI extends Application {
                 service = new TextAnalysisService(dictionary);
                 dictStatusLabel.setText("Dictionary: " + words.size() + " words");
                 statusLabel.setText("Dictionary loaded: " + file.getName());
+                updateErrorHighlight(textInput.getText());
             } catch (IOException e) {
                 showError("Dictionary Error", "Could not load dictionary: " + e.getMessage());
             }
@@ -237,6 +255,7 @@ public class TextAnalyzerAppGUI extends Application {
         resultArea.clear();
         statsTable.getItems().clear();
         errorsTable.getItems().clear();
+        errorHighlightArea.getChildren().clear();
 
         // Сбрасываем статусы
         dictStatusLabel.setText("Dictionary: not loaded");
@@ -286,10 +305,60 @@ public class TextAnalyzerAppGUI extends Application {
             // 4. Обновление интерфейса
             resultArea.setText(result.toString());
             updateStatsTable(sorted);
+            updateErrorHighlight(text);
             statusLabel.setText("Analysis completed successfully");
 
         } catch (Exception e) {
             showError("Analysis Error", "Error during analysis: " + e.getMessage());
+        }
+    }
+
+    // ======================= ПОДСВЕТКА ОШИБОК =======================
+
+    private void updateErrorHighlight(String text) {
+        errorHighlightArea.getChildren().clear();
+
+        if (text == null || text.isEmpty() || dictionary.isEmpty()) {
+            errorHighlightArea.getChildren().add(new Text("No errors detected"));
+            return;
+        }
+
+        // Разбиваем текст на слова с сохранением разделителей
+        Pattern pattern = Pattern.compile("([\\wа-яА-ЯёЁ]+)|([^\\wа-яА-ЯёЁ]+)");
+        Matcher matcher = pattern.matcher(text);
+
+        int lastEnd = 0;
+        while (matcher.find()) {
+            // Добавляем текст между словами
+            if (matcher.start() > lastEnd) {
+                String nonWord = text.substring(lastEnd, matcher.start());
+                errorHighlightArea.getChildren().add(new Text(nonWord));
+            }
+
+            if (matcher.group(1) != null) {
+                // Это слово
+                String word = matcher.group(1);
+                Text wordText = new Text(word);
+
+                // Проверяем, есть ли слово в ошибках
+                if (currentErrors != null && currentErrors.get(word.toLowerCase()) != null) {
+                    wordText.setUnderline(true);
+                    wordText.setFill(Color.RED);
+                    wordText.setStyle("-fx-underline: true; -fx-underline-color: red;");
+                }
+
+                errorHighlightArea.getChildren().add(wordText);
+            } else {
+                // Добавляем не-слово как есть
+                errorHighlightArea.getChildren().add(new Text(matcher.group(2)));
+            }
+
+            lastEnd = matcher.end();
+        }
+
+        // Добавляем оставшийся текст
+        if (lastEnd < text.length()) {
+            errorHighlightArea.getChildren().add(new Text(text.substring(lastEnd)));
         }
     }
 
@@ -316,9 +385,7 @@ public class TextAnalyzerAppGUI extends Application {
         result.ifPresent(replacement -> {
             replaceWordInText(error.getWord(), replacement);
             statusLabel.setText("Replaced \"" + error.getWord() + "\" with \"" + replacement + "\"");
-
-            // Перезапускаем анализ
-            analyzeText();
+            updateErrorHighlight(textInput.getText());
         });
     }
 
