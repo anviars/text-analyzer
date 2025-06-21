@@ -1,0 +1,8 @@
+Text analysis is the process of extracting meaningful information from text.
+Thhis application provides various text analysis features including:
+- Word frequency statistics
+- Spelling checking with suggestions
+- Word search capabilities
+- Custom dictionary support
+
+Try it with your own text!
